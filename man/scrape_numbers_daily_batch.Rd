@@ -8,6 +8,7 @@ scrape_numbers_daily_batch(
   movie_slugs,
   use_cache = TRUE,
   save_every = 500,
+  checkpoint_file = NULL,
   progress = TRUE
 )
 }
@@ -17,6 +18,8 @@ scrape_numbers_daily_batch(
 \item{use_cache}{Logical: use cached data if available (default: TRUE)}
 
 \item{save_every}{Integer: save progress to data/ every N films (default: 500, 0 to disable)}
+
+\item{checkpoint_file}{Optional file path for checkpoint saves (NULL to disable)}
 
 \item{progress}{Logical: show progress bar (default: TRUE)}
 }

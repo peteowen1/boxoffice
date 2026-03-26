@@ -243,6 +243,163 @@ is_summer_season <- function(date) {
   month >= 5 & month <= 8
 }
 
+#' Find the opening weekend rows in daily data
+#'
+#' Returns the row indices corresponding to the first Fri-Sat-Sun window.
+#' If `day_of_week` is unavailable, falls back to days 1-3.
+#'
+#' @param daily_data Data frame with daily box office (must have `day_number`,
+#'   optionally `day_of_week`)
+#' @return Integer vector of row indices for the opening weekend
+#' @keywords internal
+opening_weekend_rows <- function(daily_data) {
+  if (!"day_of_week" %in% names(daily_data) || all(is.na(daily_data$day_of_week))) {
+    # Fallback: assume days 1-3
+    return(which(daily_data$day_number <= 3))
+  }
+
+  # Find first Friday
+  fri_idx <- which(daily_data$day_of_week == "Friday")
+  if (length(fri_idx) == 0) {
+    # No Friday in data — use days 1-3
+    return(which(daily_data$day_number <= 3))
+  }
+
+  first_fri <- fri_idx[1]
+  first_fri_day <- daily_data$day_number[first_fri]
+
+  # Opening weekend = that Friday + next 2 days (Sat, Sun)
+  weekend_days <- first_fri_day:(first_fri_day + 2)
+  which(daily_data$day_number %in% weekend_days)
+}
+
+#' Validate CPI data integrity
+#'
+#' Checks that the CPI table is roughly monotonically increasing (post-1940)
+#' and has no implausible jumps. Run once per session on first use.
+#'
+#' @return Invisible TRUE if valid; warns on issues
+#' @keywords internal
+validate_cpi_data <- function() {
+  # Only validate once per session
+  if (isTRUE(.boxoffice_env$cpi_validated)) return(invisible(TRUE))
+
+  cpi <- cpi_annual
+  post_1940 <- cpi[cpi$year >= 1940, ]
+
+  # Check for year-over-year decreases > 5% (extremely rare, only in
+
+  # severe deflation). A hand-typed digit swap would show as a big drop.
+  pct_change <- diff(post_1940$cpi) / head(post_1940$cpi, -1)
+  big_drops <- which(pct_change < -0.05)
+
+  if (length(big_drops) > 0) {
+    bad_years <- post_1940$year[big_drops + 1]
+    cli::cli_warn(c(
+      "CPI data may have errors: unexpected drop(s) in {paste(bad_years, collapse = ', ')}.",
+      "i" = "Check {.file data-raw/cpi.R} for typos in the CPI values."
+    ))
+  }
+
+  # Check for implausibly large jumps (> 20% in one year)
+  big_jumps <- which(pct_change > 0.20)
+  if (length(big_jumps) > 0) {
+    bad_years <- post_1940$year[big_jumps + 1]
+    cli::cli_warn(c(
+      "CPI data may have errors: implausibly large jump(s) in {paste(bad_years, collapse = ', ')}.",
+      "i" = "Check {.file data-raw/cpi.R} for typos in the CPI values."
+    ))
+  }
+
+  .boxoffice_env$cpi_validated <- TRUE
+  invisible(TRUE)
+}
+
+#' Adjust revenue for inflation using CPI-U
+#'
+#' Converts nominal dollars to constant dollars for a target year using the
+#' bundled [cpi_annual] dataset. When a release date is provided, interpolates
+#' between adjacent years' CPI values based on the exact date position within
+#' the year, since annual CPI represents the mid-year average.
+#'
+#' @param revenue Numeric vector of revenue values in nominal dollars
+#' @param from_year Integer vector of the year each revenue was earned
+#' @param to_year Integer target year for constant dollars (default: most
+#'   recent year in the CPI table)
+#' @param release_date Optional Date vector for proportional within-year
+#'   interpolation. When NULL, uses the flat annual CPI for `from_year`.
+#' @return Numeric vector of inflation-adjusted revenue
+#' @export
+#' @examples
+#' # What is $100M in 1990 dollars worth in 2025 dollars?
+#' adjust_inflation(1e8, 1990, 2025)
+#'
+#' # With date-based interpolation (Jan release vs Dec release)
+#' adjust_inflation(1e8, 1990, 2025, as.Date("1990-01-15"))
+#' adjust_inflation(1e8, 1990, 2025, as.Date("1990-12-15"))
+adjust_inflation <- function(revenue, from_year, to_year = max(cpi_annual$year),
+                             release_date = NULL) {
+  validate_cpi_data()
+  cpi_lookup <- stats::setNames(cpi_annual$cpi, cpi_annual$year)
+  min_year <- min(cpi_annual$year)
+  max_year <- max(cpi_annual$year)
+
+  # Validate target year
+  if (!as.character(to_year) %in% names(cpi_lookup)) {
+    cli::cli_abort(c(
+      "No CPI data for target year {to_year}.",
+      "i" = "CPI table covers {min_year}-{max_year}.",
+      "i" = "Update {.file data-raw/cpi.R} to add newer years."
+    ))
+  }
+
+  to_cpi <- cpi_lookup[as.character(to_year)]
+
+  if (!is.null(release_date)) {
+    # Interpolate CPI based on exact date position within the year.
+    # Annual CPI is centered ~July 1 (mid-year average), so a date's
+    # fractional position tells us how to weight adjacent years.
+    release_date <- as.Date(release_date)
+    day_of_year <- as.integer(format(release_date, "%j"))
+    days_in_year <- ifelse(
+      lubridate::leap_year(from_year), 366, 365
+    )
+    # fraction: 0.0 = Jan 1, 0.5 ~= July 1 (CPI midpoint), 1.0 = Dec 31
+    frac <- (day_of_year - 1) / (days_in_year - 1)
+
+    # Offset from CPI midpoint: -0.5 (Jan 1) to +0.5 (Dec 31)
+    offset <- frac - 0.5
+
+    cpi_this <- cpi_lookup[as.character(from_year)]
+    # For interpolation, use adjacent year in the direction of the offset
+    adj_year <- ifelse(offset < 0, from_year - 1L, from_year + 1L)
+    cpi_adj <- cpi_lookup[as.character(adj_year)]
+
+    # Interpolate: at mid-year (offset=0) use cpi_this exactly,
+    # at edges blend halfway toward the adjacent year
+    from_cpi <- ifelse(
+      is.na(cpi_adj),
+      cpi_this,
+      cpi_this + abs(offset) * (cpi_adj - cpi_this)
+    )
+  } else {
+    from_cpi <- cpi_lookup[as.character(from_year)]
+  }
+
+  # For from_years outside the table, clamp to the nearest available year
+  missing_from <- is.na(from_cpi) & !is.na(from_year)
+  if (any(missing_from)) {
+    bad_years <- paste(unique(from_year[missing_from]), collapse = ", ")
+    cli::cli_warn(
+      "No CPI for {bad_years}; adjustment uses {max_year} CPI (as at {Sys.Date()})."
+    )
+    from_cpi[missing_from] <- cpi_lookup[as.character(max_year)]
+  }
+
+  adjusted <- revenue * (to_cpi / from_cpi)
+  ifelse(is.na(adjusted), revenue, adjusted)
+}
+
 #' Format large numbers for display
 #'
 #' @param x Numeric vector
@@ -250,11 +407,13 @@ is_summer_season <- function(date) {
 #' @return Character vector with formatted numbers
 #' @keywords internal
 format_gross <- function(x, prefix = "$") {
+  sign <- ifelse(!is.na(x) & x < 0, "-", "")
+  ax <- abs(x)
   dplyr::case_when(
-    is.na(x) ~ NA_character_,
-    abs(x) >= 1e9 ~ paste0(prefix, round(x / 1e9, 2), "B"),
-    abs(x) >= 1e6 ~ paste0(prefix, round(x / 1e6, 1), "M"),
-    abs(x) >= 1e3 ~ paste0(prefix, round(x / 1e3, 1), "K"),
-    TRUE ~ paste0(prefix, round(x, 0))
+    is.na(ax) ~ NA_character_,
+    ax >= 1e9 ~ paste0(sign, prefix, round(ax / 1e9, 2), "B"),
+    ax >= 1e6 ~ paste0(sign, prefix, round(ax / 1e6, 1), "M"),
+    ax >= 1e3 ~ paste0(sign, prefix, round(ax / 1e3, 1), "K"),
+    TRUE ~ paste0(sign, prefix, round(ax, 0))
   )
 }

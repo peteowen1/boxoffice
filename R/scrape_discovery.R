@@ -39,12 +39,12 @@ discover_films <- function(
   if ("bom" %in% sources) {
     bom_results <- vector("list", n_years)
 
+    if (progress) {
+      cli::cli_progress_bar("BOM yearly indexes", total = n_years)
+    }
+
     for (i in seq_along(years)) {
       yr <- years[i]
-      if (progress) {
-        cat(sprintf("\rBOM [%d/%d] %d...", i, n_years, yr))
-      }
-
       bom_results[[i]] <- tryCatch(
         scrape_bom_yearly_index(yr, use_cache = use_cache, save_to_data = save_to_data),
         error = function(e) {
@@ -52,9 +52,10 @@ discover_films <- function(
           NULL
         }
       )
+      if (progress) cli::cli_progress_update()
     }
 
-    if (progress) cat("\n")
+    if (progress) cli::cli_progress_done()
 
     bom_films <- dplyr::bind_rows(bom_results)
 
@@ -69,12 +70,12 @@ discover_films <- function(
   if ("numbers" %in% sources) {
     numbers_results <- vector("list", n_years)
 
+    if (progress) {
+      cli::cli_progress_bar("Numbers yearly indexes", total = n_years)
+    }
+
     for (i in seq_along(years)) {
       yr <- years[i]
-      if (progress) {
-        cat(sprintf("\rNumbers [%d/%d] %d...", i, n_years, yr))
-      }
-
       numbers_results[[i]] <- tryCatch(
         scrape_numbers_yearly_index(yr, use_cache = use_cache, save_to_data = save_to_data),
         error = function(e) {
@@ -82,9 +83,10 @@ discover_films <- function(
           NULL
         }
       )
+      if (progress) cli::cli_progress_update()
     }
 
-    if (progress) cat("\n")
+    if (progress) cli::cli_progress_done()
 
     numbers_films <- dplyr::bind_rows(numbers_results)
 
@@ -233,9 +235,9 @@ build_film_index <- function(
     # Clear cache for specified years
     for (yr in years) {
       for (src in sources) {
-        cache_path <- cache_path(src, "yearly", as.character(yr))
-        if (file.exists(cache_path)) {
-          file.remove(cache_path)
+        cp <- cache_path(src, "yearly", as.character(yr))
+        if (file.exists(cp)) {
+          file.remove(cp)
         }
       }
     }
@@ -271,9 +273,9 @@ find_film <- function(title, year = NULL, index = NULL) {
     index <- build_film_index(year)
   }
 
-  # Search by title
+  # Search by title (use fixed = TRUE to avoid regex injection from special chars in titles)
   title_pattern <- tolower(title)
-  matches <- index[grepl(title_pattern, tolower(index$title), fixed = FALSE), ]
+  matches <- index[grepl(title_pattern, tolower(index$title), fixed = TRUE), ]
 
   # Filter by year if provided
   if (!is.null(year) && nrow(matches) > 0) {

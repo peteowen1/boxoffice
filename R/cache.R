@@ -144,6 +144,34 @@ write_cache <- function(source, type, key, data) {
   })
 }
 
+#' Cache a scrape failure with short expiry
+#'
+#' Caches a failure marker that expires after 1 day, so transient
+#' errors don't permanently poison the cache.
+#'
+#' @param source Character: "bom" or "numbers"
+#' @param type Character: "yearly", "daily", or "metadata"
+#' @param key Character key identifier
+#' @return Invisible NULL
+#' @keywords internal
+cache_failure <- function(source, type, key) {
+  failure_type <- paste0(type, "_failures")
+  write_cache(source, failure_type, key, data.frame())
+  invisible(NULL)
+}
+
+#' Check if a previous scrape attempt failed recently
+#'
+#' @param source Character: "bom" or "numbers"
+#' @param type Character: "yearly", "daily", or "metadata"
+#' @param key Character key identifier
+#' @return Logical: TRUE if a recent failure is cached (within 1 day)
+#' @keywords internal
+is_cached_failure <- function(source, type, key) {
+  failure_type <- paste0(type, "_failures")
+  is_cached(source, failure_type, key, expires_days = 1)
+}
+
 #' Clear cached data
 #'
 #' @param type Character: "all", "bom", "numbers", or specific type like "bom/daily"
@@ -203,9 +231,10 @@ cache_stats <- function() {
   file_info <- file.info(files)
   total_size <- sum(file_info$size, na.rm = TRUE) / 1024 / 1024
 
-  # Count by source and type
-  rel_paths <- gsub(paste0(cache_dir, "/"), "", files, fixed = TRUE)
-  rel_paths <- gsub(paste0(cache_dir, "\\"), "", rel_paths, fixed = TRUE)
+  # Count by source and type — normalize separators for reliable stripping
+  norm_cache <- normalizePath(cache_dir, winslash = "/", mustWork = FALSE)
+  norm_files <- normalizePath(files, winslash = "/", mustWork = FALSE)
+  rel_paths <- sub(paste0(norm_cache, "/"), "", norm_files, fixed = TRUE)
 
   parts <- strsplit(rel_paths, "[/\\\\]")
   sources <- vapply(parts, function(x) if (length(x) >= 1) x[1] else "unknown", character(1))

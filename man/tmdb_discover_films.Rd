@@ -19,7 +19,7 @@ tmdb_discover_films(
 
 \item{end_year}{Integer end year filter (inclusive), or NULL for all time}
 
-\item{max_pages}{Maximum pages to fetch (default 500, TMDB cap)}
+\item{max_pages}{Maximum discover pages to fetch (default 500, TMDB cap)}
 
 \item{use_cache}{Logical whether to use cached results}
 }
@@ -27,6 +27,8 @@ tmdb_discover_films(
 Tibble with columns: tmdb_id, title, release_date, year, revenue
 }
 \description{
-Uses the TMDB \verb{/discover/movie} endpoint sorted by revenue descending.
-Paginates until revenue drops below \code{min_revenue}.
+Uses the TMDB \verb{/discover/movie} endpoint sorted by revenue descending to get
+a sorted list of film IDs, then fetches \verb{/movie/\{id\}} for each to get the
+actual revenue (which isn't included in discover results). Uses
+\code{append_to_response=credits} to also fetch cast in the same call.
 }

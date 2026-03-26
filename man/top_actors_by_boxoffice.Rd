@@ -10,12 +10,17 @@ top_actors_by_boxoffice(
   end_year = NULL,
   max_billing = NULL,
   min_films = 2,
+  adjust_inflation = FALSE,
+  inflation_year = max(cpi_annual$year),
   use_cache = TRUE
 )
 }
 \arguments{
 \item{min_revenue}{Numeric minimum worldwide revenue in USD (default 1e8 = $100M).
-This is \strong{worldwide theatrical revenue} as reported by TMDB.}
+This is \strong{worldwide theatrical revenue} as reported by TMDB. When
+\code{adjust_inflation = TRUE}, the threshold is applied in constant
+(\code{inflation_year}) dollars — the discover query automatically uses a
+deflated nominal floor so older hits are not missed.}
 
 \item{start_year}{Integer start year (inclusive), or NULL for all time}
 
@@ -26,6 +31,13 @@ all credited cast. E.g., \code{max_billing = 5} counts only top-5-billed actors.
 
 \item{min_films}{Integer minimum number of qualifying films to include an
 actor in results (default 2)}
+
+\item{adjust_inflation}{Logical whether to adjust revenue for inflation
+using CPI-U (default FALSE). When TRUE, revenue columns reflect constant
+dollars for \code{inflation_year}.}
+
+\item{inflation_year}{Integer target year for inflation adjustment (default:
+most recent year in CPI table, currently 2025).}
 
 \item{use_cache}{Logical whether to use cached API results (default TRUE)}
 }

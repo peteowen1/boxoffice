@@ -17,3 +17,4 @@ Data frame with opening features
 \description{
 Extract opening period features
 }
+\keyword{internal}

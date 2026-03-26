@@ -11,8 +11,9 @@
 #'   \item{year}{Release year}
 #'   \item{distributor}{Distribution company}
 #'   \item{total_gross}{Total domestic gross}
-#'   \item{opening_gross}{Opening weekend gross}
+#'   \item{domestic_gross}{Domestic gross (from Numbers source)}
 #'   \item{theaters_max}{Maximum theater count}
+#'   \item{matched}{Logical: matched across both sources}
 #' }
 #' @source \url{https://www.boxofficemojo.com} and \url{https://www.the-numbers.com}
 "boxoffice_films"
@@ -35,25 +36,40 @@
 #' @source \url{https://www.boxofficemojo.com}
 "boxoffice_daily"
 
-#' Pre-computed Feature Matrix
+# TODO: Uncomment when boxoffice_features.rda is created in data/
+# #' Pre-computed Feature Matrix
+# #'
+# #' A dataset containing extracted features for all historical films,
+# #' ready for model training.
+# #'
+# #' @format A data frame with features including:
+# #' \describe{
+# #'   \item{release_id}{Film identifier}
+# #'   \item{title}{Film title}
+# #'   \item{year}{Release year}
+# #'   \item{day1_gross}{Opening day gross}
+# #'   \item{weekend1_gross}{Opening weekend gross}
+# #'   \item{week1_gross}{Opening week gross}
+# #'   \item{opening_theaters}{Opening theater count}
+# #'   \item{decay_slope}{Daily decay rate}
+# #'   \item{weekend2_drop}{Second weekend drop percentage}
+# #'   \item{total_gross}{Final domestic gross (target variable)}
+# #' }
+# "boxoffice_features"
+
+#' CPI-U Annual Averages (1913-2025)
 #'
-#' A dataset containing extracted features for all historical films,
-#' ready for model training.
+#' Consumer Price Index for All Urban Consumers (CPI-U), annual averages,
+#' used for inflation adjustment of revenue figures.
 #'
-#' @format A data frame with features including:
+#' @format A data frame with columns:
 #' \describe{
-#'   \item{release_id}{Film identifier}
-#'   \item{title}{Film title}
-#'   \item{year}{Release year}
-#'   \item{day1_gross}{Opening day gross}
-#'   \item{weekend1_gross}{Opening weekend gross}
-#'   \item{week1_gross}{Opening week gross}
-#'   \item{opening_theaters}{Opening theater count}
-#'   \item{decay_slope}{Daily decay rate}
-#'   \item{weekend2_drop}{Second weekend drop percentage}
-#'   \item{total_gross}{Final domestic gross (target variable)}
+#'   \item{year}{Integer year}
+#'   \item{cpi}{Annual average CPI-U value (base period 1982-84 = 100)}
 #' }
-"boxoffice_features"
+#' @source U.S. Bureau of Labor Statistics, Series CUUR0000SA0.
+#'   \url{https://data.bls.gov/timeseries/CUUR0000SA0}
+"cpi_annual"
 
 # TODO: Uncomment when boxoffice_model.rda is created in data/
 # #' Pre-trained Projection Model

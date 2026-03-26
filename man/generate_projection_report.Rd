@@ -8,7 +8,9 @@ generate_projection_report(
   daily_data,
   metadata = NULL,
   model = NULL,
-  historical_features = NULL
+  historical_features = NULL,
+  adjust_for_inflation = FALSE,
+  inflation_year = max(cpi_annual$year)
 )
 }
 \arguments{
@@ -19,6 +21,12 @@ generate_projection_report(
 \item{model}{Trained projection model (optional)}
 
 \item{historical_features}{Data frame for finding comparables (optional)}
+
+\item{adjust_for_inflation}{Logical: include inflation-adjusted figures
+(default: FALSE)}
+
+\item{inflation_year}{Integer target year for constant dollars (default:
+most recent year in the CPI table)}
 }
 \value{
 List with projections and analysis

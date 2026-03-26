@@ -15,3 +15,4 @@ List with theater metrics
 \description{
 Computes theater-related metrics like expansion rate and decay.
 }
+\keyword{internal}

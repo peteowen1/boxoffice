@@ -25,3 +25,4 @@ rate limiting and user agent configuration.
 session <- create_scrape_session("https://www.boxofficemojo.com")
 }
 }
+\keyword{internal}

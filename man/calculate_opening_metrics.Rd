@@ -15,3 +15,4 @@ List with opening metrics
 \description{
 Computes opening day, weekend, and week metrics.
 }
+\keyword{internal}

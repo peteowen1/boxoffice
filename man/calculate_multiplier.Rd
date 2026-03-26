@@ -15,3 +15,4 @@ Numeric multiplier
 \description{
 Computes the ratio of total gross to opening weekend.
 }
+\keyword{internal}

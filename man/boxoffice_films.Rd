@@ -13,8 +13,9 @@ A data frame with the following columns:
 \item{year}{Release year}
 \item{distributor}{Distribution company}
 \item{total_gross}{Total domestic gross}
-\item{opening_gross}{Opening weekend gross}
+\item{domestic_gross}{Domestic gross (from Numbers source)}
 \item{theaters_max}{Maximum theater count}
+\item{matched}{Logical: matched across both sources}
 }
 }
 \source{

@@ -29,13 +29,6 @@ scrape_numbers_yearly_index <- function(year, use_cache = TRUE, save_to_data = F
     cli::cli_abort("Year must be between 1980 and {current_year + 1}")
   }
 
-  # Check for saved data file first
-  data_file <- file.path("data", paste0("numbers_", year, ".rds"))
-  if (file.exists(data_file)) {
-    cli::cli_alert_info("Using saved data for Numbers {year}")
-    return(readRDS(data_file))
-  }
-
   # Check cache
   cache_key <- as.character(year)
   expires <- if (year >= current_year) 7 else NULL
@@ -57,7 +50,8 @@ scrape_numbers_yearly_index <- function(year, use_cache = TRUE, save_to_data = F
     year
   )
 
-  all_films <- data.frame()
+  all_pages <- list()
+  page_num <- 0
   page_start <- 1
 
   repeat {
@@ -136,14 +130,15 @@ scrape_numbers_yearly_index <- function(year, use_cache = TRUE, save_to_data = F
       cell_text <- rvest::html_text2(cells)
       cell_text <- stringr::str_trim(cell_text)
 
-      # Find the gross column (has $ sign)
-      gross_val <- NA_real_
-      for (ct in cell_text) {
-        if (grepl("^\\$", ct)) {
-          gross_val <- parse_currency(ct)
-          break
-        }
-      }
+      # Parse all $-prefixed columns — The Numbers typically has
+      # multiple: total gross, opening weekend, budget, etc.
+      dollar_vals <- vapply(cell_text, function(ct) {
+        if (grepl("^\\$", ct)) parse_currency(ct) else NA_real_
+      }, numeric(1), USE.NAMES = FALSE)
+      dollar_idx <- which(!is.na(dollar_vals))
+
+      # First dollar column is usually total gross
+      gross_val <- if (length(dollar_idx) >= 1) dollar_vals[dollar_idx[1]] else NA_real_
 
       tryCatch({
         data.frame(
@@ -159,7 +154,8 @@ scrape_numbers_yearly_index <- function(year, use_cache = TRUE, save_to_data = F
       break
     }
 
-    all_films <- rbind(all_films, page_films)
+    page_num <- page_num + 1
+    all_pages[[page_num]] <- page_films
 
     # Check if there are more pages
     # Look for next page link or check if we got fewer than 100 results
@@ -170,6 +166,8 @@ scrape_numbers_yearly_index <- function(year, use_cache = TRUE, save_to_data = F
     page_start <- page_start + 100
     cli::cli_alert_info("Fetching page {page_start/100 + 1}...")
   }
+
+  all_films <- dplyr::bind_rows(all_pages)
 
   if (nrow(all_films) == 0) {
     cli::cli_abort("No films found for {year}")
@@ -183,9 +181,11 @@ scrape_numbers_yearly_index <- function(year, use_cache = TRUE, save_to_data = F
   # Cache result
   write_cache("numbers", "yearly", cache_key, all_films)
 
-  # Save to data folder
+  # Save to data folder (for use from data-raw scripts)
   if (save_to_data) {
-    if (!dir.exists("data")) dir.create("data", recursive = TRUE)
+    data_dir <- file.path("data")
+    if (!dir.exists(data_dir)) dir.create(data_dir, recursive = TRUE)
+    data_file <- file.path(data_dir, paste0("numbers_", year, ".rds"))
     saveRDS(all_films, data_file)
     cli::cli_alert_success("Saved to {data_file}")
   }
@@ -222,15 +222,14 @@ scrape_numbers_daily <- function(movie_slug, use_cache = TRUE) {
   # Check cache (daily data never expires)
   if (use_cache && is_cached("numbers", "daily", movie_slug, expires_days = NULL)) {
     cached_data <- read_cache("numbers", "daily", movie_slug)
-    if (!is.null(cached_data)) {
-      # Return NULL for cached failures (empty data frames with 0 rows)
-      if (is.data.frame(cached_data) && nrow(cached_data) == 0) {
-        return(NULL)
-      }
-      if (is.data.frame(cached_data)) {
-        return(cached_data)
-      }
+    if (!is.null(cached_data) && is.data.frame(cached_data) && nrow(cached_data) > 0) {
+      return(cached_data)
     }
+  }
+
+  # Skip if a recent failure is cached (retry after 1 day)
+  if (use_cache && is_cached_failure("numbers", "daily", movie_slug)) {
+    return(NULL)
   }
 
   # Build URL
@@ -240,8 +239,7 @@ scrape_numbers_daily <- function(movie_slug, use_cache = TRUE) {
   html <- fetch_html(url, delay = 1)
   if (is.null(html)) {
     cli::cli_warn("Failed to fetch daily data for {movie_slug}")
-    # Cache failure as empty data frame so we don't retry
-    write_cache("numbers", "daily", movie_slug, data.frame())
+    cache_failure("numbers", "daily", movie_slug)
     return(NULL)
   }
 
@@ -265,8 +263,7 @@ scrape_numbers_daily <- function(movie_slug, use_cache = TRUE) {
 
   if (is.null(daily_table)) {
     cli::cli_warn("No daily table found for {movie_slug}")
-    # Cache failure as empty data frame so we don't retry
-    write_cache("numbers", "daily", movie_slug, data.frame())
+    cache_failure("numbers", "daily", movie_slug)
     return(NULL)
   }
 
@@ -275,8 +272,7 @@ scrape_numbers_daily <- function(movie_slug, use_cache = TRUE) {
 
   if (length(rows) < 2) {
     cli::cli_warn("Empty daily table for {movie_slug}")
-    # Cache failure as empty data frame so we don't retry
-    write_cache("numbers", "daily", movie_slug, data.frame())
+    cache_failure("numbers", "daily", movie_slug)
     return(NULL)
   }
 
@@ -313,8 +309,7 @@ scrape_numbers_daily <- function(movie_slug, use_cache = TRUE) {
 
   if (nrow(daily_data) == 0) {
     cli::cli_warn("No daily data parsed for {movie_slug}")
-    # Cache failure as empty data frame so we don't retry
-    write_cache("numbers", "daily", movie_slug, data.frame())
+    cache_failure("numbers", "daily", movie_slug)
     return(NULL)
   }
 
@@ -476,6 +471,7 @@ scrape_numbers_metadata <- function(movie_slug, use_cache = TRUE) {
 #' @param movie_slugs Character vector of movie slugs
 #' @param use_cache Logical: use cached data if available (default: TRUE)
 #' @param save_every Integer: save progress to data/ every N films (default: 500, 0 to disable)
+#' @param checkpoint_file Optional file path for checkpoint saves (NULL to disable)
 #' @param progress Logical: show progress bar (default: TRUE)
 #' @return List of data frames (named by movie_slug)
 #' @export
@@ -484,81 +480,14 @@ scrape_numbers_metadata <- function(movie_slug, use_cache = TRUE) {
 #' films <- c("Barbie-(2023)", "Oppenheimer-(2023)")
 #' daily_data <- scrape_numbers_daily_batch(films)
 #' }
-scrape_numbers_daily_batch <- function(movie_slugs, use_cache = TRUE, save_every = 500, progress = TRUE) {
-  n <- length(movie_slugs)
-
-  if (n == 0) {
-    return(list())
-  }
-
-  # Load existing progress from data/
-  data_file <- "data/numbers_daily.rds"
-  if (file.exists(data_file)) {
-    existing <- readRDS(data_file)
-    cli::cli_alert_info("Loaded {length(existing)} existing films from {data_file}")
-  } else {
-    existing <- list()
-  }
-
-  # Skip already-scraped films
-  already_done <- names(existing)
-  to_scrape <- setdiff(movie_slugs, already_done)
-
-  if (length(to_scrape) == 0) {
-    cli::cli_alert_success("All {n} films already scraped")
-    return(existing[movie_slugs[movie_slugs %in% names(existing)]])
-  }
-
-  cli::cli_alert_info("Scraping {length(to_scrape)} new films ({length(already_done)} already done)")
-
-  if (progress) {
-    cli::cli_progress_bar(
-      format = "Scraping daily data [{cli::pb_current}/{cli::pb_total}] {cli::pb_bar} {cli::pb_percent}",
-      total = length(to_scrape)
-    )
-  }
-
-  results <- existing
-  new_count <- 0
-
-  for (i in seq_along(to_scrape)) {
-    slug <- to_scrape[i]
-    results[[slug]] <- tryCatch(
-      scrape_numbers_daily(slug, use_cache = use_cache),
-      error = function(e) {
-        cli::cli_alert_danger("Error scraping {slug}: {e$message}")
-        NULL
-      }
-    )
-
-    new_count <- new_count + 1
-
-    # Save progress periodically
-    if (save_every > 0 && new_count %% save_every == 0) {
-      if (!dir.exists("data")) dir.create("data", recursive = TRUE)
-      clean_results <- results[!vapply(results, is.null, logical(1))]
-      saveRDS(clean_results, data_file)
-      cli::cli_alert_success("Checkpoint: saved {length(clean_results)} films to {data_file}")
-    }
-
-    if (progress) {
-      cli::cli_progress_update()
-    }
-  }
-
-  if (progress) {
-    cli::cli_progress_done()
-  }
-
-  # Remove NULL entries and final save
-  results <- results[!vapply(results, is.null, logical(1))]
-
-  if (save_every > 0) {
-    if (!dir.exists("data")) dir.create("data", recursive = TRUE)
-    saveRDS(results, data_file)
-    cli::cli_alert_success("Saved {length(results)} films to {data_file}")
-  }
-
-  cli::cli_alert_success("Successfully scraped {length(results)}/{n} films")
-  results
+scrape_numbers_daily_batch <- function(movie_slugs, use_cache = TRUE, save_every = 500,
+                                       checkpoint_file = NULL, progress = TRUE) {
+  batch_scrape_daily(
+    ids = movie_slugs,
+    scrape_fn = scrape_numbers_daily,
+    use_cache = use_cache,
+    checkpoint_file = checkpoint_file,
+    save_every = save_every,
+    progress = progress
+  )
 }
