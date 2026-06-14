@@ -10,7 +10,7 @@ devtools::document()    # Regenerate NAMESPACE + man/ (never edit NAMESPACE manu
 devtools::check()       # Full R CMD check
 ```
 
-No `tests/` directory — verify changes by running `data-raw/download_sample_data.R` or `analysis/` scripts against the live BOM/Numbers sites.
+No `tests/` directory — verify changes by running `data-raw/download_sample_data.R` (or the other `data-raw/` scripts) against the live BOM/Numbers sites.
 
 ## Pipeline
 
