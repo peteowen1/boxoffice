@@ -4,11 +4,7 @@ R package for scraping daily box office data from Box Office Mojo (BOM) and The 
 
 ## Development Commands
 
-```r
-devtools::load_all()    # Iterative dev
-devtools::document()    # Regenerate NAMESPACE + man/ (never edit NAMESPACE manually)
-devtools::check()       # Full R CMD check
-```
+Standard `devtools::load_all()` / `document()` / `check()` workflow (NAMESPACE is auto-generated — never edit manually).
 
 No `tests/` directory — verify changes by running `data-raw/download_sample_data.R` (or the other `data-raw/` scripts) against the live BOM/Numbers sites.
 
