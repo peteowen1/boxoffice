@@ -17,3 +17,4 @@ Data frame with trajectory features
 \description{
 Extract trajectory and decay features
 }
+\keyword{internal}

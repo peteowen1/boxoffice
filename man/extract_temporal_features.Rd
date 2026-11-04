@@ -15,3 +15,4 @@ Data frame with temporal features
 \description{
 Extract temporal/seasonality features
 }
+\keyword{internal}

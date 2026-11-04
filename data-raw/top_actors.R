@@ -6,7 +6,9 @@ devtools::load_all()
 # All actors in $100M+ worldwide films, all time
 actors <- top_actors_by_boxoffice(
   min_revenue = 1e8,
-  min_films = 3
+  min_films = 3,
+  adjust_inflation= FALSE,
+  max_billing = 10
 )
 
 # Preview top 30
@@ -19,3 +21,7 @@ print(
 # Save full results
 arrow::write_parquet(actors, "data-raw/top_actors.parquet")
 cli::cli_alert_success("Saved {nrow(actors)} actors to data-raw/top_actors.parquet")
+
+###
+julia <- get_actor_filmography("Julia Roberts")
+bruce <- get_actor_filmography("Bruce Willis")

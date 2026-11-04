@@ -20,3 +20,4 @@ Data frame with one row containing all features
 Combines opening, temporal, trajectory, and categorical features
 into a single feature vector for a film.
 }
+\keyword{internal}

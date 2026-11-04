@@ -18,3 +18,4 @@ List with merged metadata
 Combines film metadata from Box Office Mojo and The Numbers,
 preferring The Numbers for budget data and BOM for other fields.
 }
+\keyword{internal}

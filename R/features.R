@@ -7,7 +7,7 @@
 #' @param metadata List with film metadata
 #' @param n_days Number of opening days to use as features (default: 10)
 #' @return Data frame with one row containing all features
-#' @export
+#' @keywords internal
 extract_all_features <- function(daily_data, metadata = NULL, n_days = 10) {
   features <- data.frame(row.names = 1)
 
@@ -43,7 +43,7 @@ extract_all_features <- function(daily_data, metadata = NULL, n_days = 10) {
 #' @param daily_data Data frame with daily box office
 #' @param n_days Number of days to consider (default: 10)
 #' @return Data frame with opening features
-#' @export
+#' @keywords internal
 extract_opening_features <- function(daily_data, n_days = 10) {
   if (is.null(daily_data) || nrow(daily_data) == 0) {
     return(data.frame(row.names = 1))
@@ -61,12 +61,18 @@ extract_opening_features <- function(daily_data, n_days = 10) {
     day1 <- early_data[early_data$day_number == 1, ]
     features$day1_gross <- day1$daily_gross[1]
     features$day1_theaters <- day1$theaters[1]
-    features$day1_per_theater <- if (!is.null(day1$per_theater_avg[1])) day1$per_theater_avg[1] else
+    features$day1_per_theater <- if (!is.null(day1$per_theater_avg[1]) && !is.na(day1$per_theater_avg[1])) {
+      day1$per_theater_avg[1]
+    } else if (!is.na(day1$theaters[1]) && day1$theaters[1] > 0) {
       day1$daily_gross[1] / day1$theaters[1]
+    } else {
+      NA_real_
+    }
   }
 
-  # Opening weekend (days 1-3)
-  weekend1 <- early_data[early_data$day_number <= 3, ]
+  # Opening weekend (first Fri-Sat-Sun window)
+  ow_idx <- opening_weekend_rows(early_data)
+  weekend1 <- early_data[ow_idx, ]
   if (nrow(weekend1) > 0) {
     features$weekend1_gross <- sum(weekend1$daily_gross, na.rm = TRUE)
     features$weekend1_days <- nrow(weekend1)
@@ -97,9 +103,11 @@ extract_opening_features <- function(daily_data, n_days = 10) {
     }
   }
 
-  # Second weekend (days 8-10) if available
-  if (n_days >= 10) {
-    weekend2 <- early_data[early_data$day_number >= 8 & early_data$day_number <= 10, ]
+  # Second weekend (7 days after opening weekend)
+  if (nrow(weekend1) > 0) {
+    ow_days <- weekend1$day_number
+    w2_days <- ow_days + 7
+    weekend2 <- early_data[early_data$day_number %in% w2_days, ]
     if (nrow(weekend2) > 0 && !is.null(features$weekend1_gross)) {
       features$weekend2_gross <- sum(weekend2$daily_gross, na.rm = TRUE)
       features$weekend2_drop <- (features$weekend1_gross - features$weekend2_gross) / features$weekend1_gross
@@ -114,7 +122,7 @@ extract_opening_features <- function(daily_data, n_days = 10) {
 #' @param daily_data Data frame with daily box office
 #' @param n_days Number of days to analyze
 #' @return Data frame with trajectory features
-#' @export
+#' @keywords internal
 extract_trajectory_features <- function(daily_data, n_days = 10) {
   if (is.null(daily_data) || nrow(daily_data) < 3) {
     return(data.frame(row.names = 1))
@@ -149,7 +157,10 @@ extract_trajectory_features <- function(daily_data, n_days = 10) {
     sundays <- early_data$daily_gross[early_data$day_of_week == "Sunday"]
 
     if (length(saturdays) > 0 && length(sundays) > 0) {
-      features$sat_sun_ratio <- mean(sundays, na.rm = TRUE) / mean(saturdays, na.rm = TRUE)
+      sat_avg <- mean(saturdays, na.rm = TRUE)
+      if (!is.na(sat_avg) && sat_avg > 0) {
+        features$sat_sun_ratio <- mean(sundays, na.rm = TRUE) / sat_avg
+      }
     }
   }
 
@@ -161,7 +172,9 @@ extract_trajectory_features <- function(daily_data, n_days = 10) {
     if (nrow(first_half) > 0 && nrow(second_half) > 0) {
       first_avg <- mean(first_half$daily_gross, na.rm = TRUE)
       second_avg <- mean(second_half$daily_gross, na.rm = TRUE)
-      features$momentum_score <- second_avg / first_avg
+      if (!is.na(first_avg) && first_avg > 0) {
+        features$momentum_score <- second_avg / first_avg
+      }
     }
   }
 
@@ -172,7 +185,7 @@ extract_trajectory_features <- function(daily_data, n_days = 10) {
 #'
 #' @param daily_data Data frame with daily box office
 #' @return Data frame with theater features
-#' @export
+#' @keywords internal
 extract_theater_features <- function(daily_data) {
 
   if (is.null(daily_data) || nrow(daily_data) == 0 || !"theaters" %in% names(daily_data)) {
@@ -227,7 +240,7 @@ extract_theater_features <- function(daily_data) {
 #'
 #' @param release_date Date of film release
 #' @return Data frame with temporal features
-#' @export
+#' @keywords internal
 extract_temporal_features <- function(release_date) {
   if (is.null(release_date) || is.na(release_date)) {
     return(data.frame(row.names = 1))
@@ -262,7 +275,7 @@ extract_temporal_features <- function(release_date) {
 #'
 #' @param metadata List with film metadata
 #' @return Data frame with encoded categorical features
-#' @export
+#' @keywords internal
 extract_categorical_features <- function(metadata) {
   if (is.null(metadata)) {
     return(data.frame(row.names = 1))
@@ -327,10 +340,18 @@ extract_categorical_features <- function(metadata) {
 #' @param films_data Data frame with film metadata
 #' @param daily_data_list Named list of daily data frames
 #' @param n_days Number of opening days to use
+#' @param adjust_for_inflation Logical: convert revenue features to constant
+#'   dollars so cross-year comparisons are fair (default: FALSE)
+#' @param inflation_year Integer target year for constant dollars (default:
+#'   most recent year in the CPI table). Ignored when
+#'   `adjust_for_inflation = FALSE`.
 #' @param progress Show progress bar
 #' @return Data frame with features for all films
 #' @export
-build_feature_matrix <- function(films_data, daily_data_list, n_days = 10, progress = TRUE) {
+build_feature_matrix <- function(films_data, daily_data_list, n_days = 10,
+                                 adjust_for_inflation = FALSE,
+                                 inflation_year = max(cpi_annual$year),
+                                 progress = TRUE) {
   n <- nrow(films_data)
 
   if (n == 0) {
@@ -373,5 +394,32 @@ build_feature_matrix <- function(films_data, daily_data_list, n_days = 10, progr
   }
 
   # Combine all features
-  dplyr::bind_rows(results)
+  feature_matrix <- dplyr::bind_rows(results)
+
+  # Adjust revenue features to constant dollars for fair cross-year comparison
+  if (adjust_for_inflation && nrow(feature_matrix) > 0 && "year" %in% names(feature_matrix)) {
+    revenue_cols <- c("day1_gross", "weekend1_gross", "weekend2_gross",
+                      "week1_gross", "week1_avg_daily", "cumulative_n_days",
+                      "day1_per_theater", "opening_per_theater",
+                      "budget", "total_gross")
+    revenue_cols <- intersect(revenue_cols, names(feature_matrix))
+
+    for (col in revenue_cols) {
+      feature_matrix[[col]] <- adjust_inflation(
+        feature_matrix[[col]], feature_matrix$year, inflation_year
+      )
+    }
+
+    # Recompute log features that depend on adjusted values
+    if ("budget" %in% revenue_cols && "log_budget" %in% names(feature_matrix)) {
+      feature_matrix$log_budget <- log(feature_matrix$budget + 1)
+    }
+    if ("opening_per_theater" %in% revenue_cols && "log_opening_pta" %in% names(feature_matrix)) {
+      feature_matrix$log_opening_pta <- log(feature_matrix$opening_per_theater + 1)
+    }
+
+    cli::cli_alert_info("Revenue features adjusted to {inflation_year} dollars")
+  }
+
+  feature_matrix
 }

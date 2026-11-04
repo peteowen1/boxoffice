@@ -15,3 +15,4 @@ List with: is_valid, issues (character vector), cleaned_data
 \description{
 Checks daily data for common issues and inconsistencies.
 }
+\keyword{internal}

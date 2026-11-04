@@ -4,7 +4,14 @@
 \alias{build_feature_matrix}
 \title{Build feature matrix for multiple films}
 \usage{
-build_feature_matrix(films_data, daily_data_list, n_days = 10, progress = TRUE)
+build_feature_matrix(
+  films_data,
+  daily_data_list,
+  n_days = 10,
+  adjust_for_inflation = FALSE,
+  inflation_year = max(cpi_annual$year),
+  progress = TRUE
+)
 }
 \arguments{
 \item{films_data}{Data frame with film metadata}
@@ -12,6 +19,13 @@ build_feature_matrix(films_data, daily_data_list, n_days = 10, progress = TRUE)
 \item{daily_data_list}{Named list of daily data frames}
 
 \item{n_days}{Number of opening days to use}
+
+\item{adjust_for_inflation}{Logical: convert revenue features to constant
+dollars so cross-year comparisons are fair (default: FALSE)}
+
+\item{inflation_year}{Integer target year for constant dollars (default:
+most recent year in the CPI table). Ignored when
+\code{adjust_for_inflation = FALSE}.}
 
 \item{progress}{Show progress bar}
 }

@@ -15,3 +15,4 @@ Data frame with additional columns
 \description{
 Adds calculated fields like week number, weekend flags, and rolling averages.
 }
+\keyword{internal}

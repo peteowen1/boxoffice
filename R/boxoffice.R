@@ -20,11 +20,40 @@
 #' * [find_film()] - Search for a specific film
 #'
 #' @keywords internal
+#'
+#' @importFrom cli cli_abort cli_alert_danger cli_alert_info cli_alert_success
+#'   cli_alert_warning cli_bullets cli_code cli_h1 cli_h2 cli_h3
+#'   cli_progress_bar cli_progress_done cli_progress_update cli_text cli_warn
+#' @importFrom dplyr arrange as_tibble bind_rows case_when
+#'   desc distinct filter group_by left_join mutate n summarise tibble
+#' @importFrom httr2 req_auth_bearer_token req_perform req_retry req_timeout
+#'   req_url_query req_user_agent request resp_body_html resp_body_json
+#'   resp_status
+#' @importFrom lubridate day leap_year mdy month wday week year ymd
+#' @importFrom purrr compact imap map map_dfr
+#' @importFrom rlang check_installed
+#' @importFrom rvest html_attr html_element html_elements html_text2
+#' @importFrom rlang .data
+#' @importFrom stats predict
+#' @importFrom utils head
+#' @importFrom stringr str_detect str_extract str_match str_remove str_remove_all
+#'   str_replace_all str_split str_squish str_to_title str_trim
 "_PACKAGE"
 
-#' Null coalescing operator
+# Null coalescing operator (NULL-only, standard R semantics)
+# No roxygen — the %||% name generates an Rd file with | in \name{} which
+# triggers R CMD check warnings. This is a simple internal helper.
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+#' Coalesce scalar: return first non-NULL, non-NA scalar
+#'
+#' Designed for merge_metadata where each field is a single value.
+#' For vectors, returns `x` if it has any non-NULL content (even if
+#' it contains NAs); use `dplyr::coalesce()` for element-wise coalescing.
 #' @keywords internal
-`%||%` <- function(x, y) if (is.null(x) || (length(x) == 1 && is.na(x))) y else x
+coalesce_value <- function(x, y) {
+  if (!is.null(x) && !(length(x) == 1 && is.na(x))) x else y
+}
 
 #' Get box office data for a single film
 #'
@@ -234,7 +263,7 @@ build_historical_dataset <- function(
 
   cli::cli_alert_info("Building dataset for {n_years} years ({start_year}-{end_year})")
 
-  all_films <- data.frame()
+  films_list <- vector("list", n_years)
   all_daily <- list()
 
   for (i in seq_along(years)) {
@@ -256,7 +285,7 @@ build_historical_dataset <- function(
 
     if (!is.null(year_data)) {
       if (nrow(year_data$films) > 0) {
-        all_films <- rbind(all_films, year_data$films)
+        films_list[[i]] <- year_data$films
       }
       if (!is.null(year_data$daily_data)) {
         all_daily <- c(all_daily, year_data$daily_data)
@@ -264,6 +293,7 @@ build_historical_dataset <- function(
     }
   }
 
+  all_films <- dplyr::bind_rows(films_list)
   cli::cli_alert_success("Built dataset with {nrow(all_films)} films")
 
   list(
@@ -283,12 +313,19 @@ build_historical_dataset <- function(
 #' @param model Trained model from train_projection_model (NULL = use trajectory only)
 #' @param sources Data sources to use
 #' @param use_cache Use cached data
+#' @param adjust_for_inflation Logical: include inflation-adjusted figures in
+#'   the report (default: FALSE)
+#' @param inflation_year Integer target year for constant dollars (default:
+#'   most recent year in the CPI table)
 #' @return Projection report object
 #' @export
 #' @examples
 #' \dontrun{
 #' projection <- project_theatrical_run("Barbie", 2023)
 #' print(projection)
+#'
+#' # With inflation adjustment to 2025 dollars
+#' projection <- project_theatrical_run("Titanic", 1997, adjust_for_inflation = TRUE)
 #' }
 project_theatrical_run <- function(
     title,
@@ -296,7 +333,9 @@ project_theatrical_run <- function(
     days_available = NULL,
     model = NULL,
     sources = c("bom", "numbers"),
-    use_cache = TRUE
+    use_cache = TRUE,
+    adjust_for_inflation = FALSE,
+    inflation_year = max(cpi_annual$year)
 ) {
   # Get film data
   film_data <- get_film_data(
@@ -324,7 +363,9 @@ project_theatrical_run <- function(
     daily_data = daily,
     metadata = film_data$metadata,
     model = model,
-    historical_features = NULL
+    historical_features = NULL,
+    adjust_for_inflation = adjust_for_inflation,
+    inflation_year = inflation_year
   )
 
   report

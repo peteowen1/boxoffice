@@ -17,3 +17,4 @@ Data frame with complete daily series
 \description{
 Interpolates or fills missing days in daily box office data.
 }
+\keyword{internal}

@@ -20,3 +20,4 @@ Merged data frame with source indicator for each day
 Combines daily box office data from Box Office Mojo and The Numbers,
 preferring BOM data where available but filling gaps from Numbers.
 }
+\keyword{internal}

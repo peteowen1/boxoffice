@@ -15,3 +15,4 @@ Data frame with encoded categorical features
 \description{
 Extract categorical features
 }
+\keyword{internal}

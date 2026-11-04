@@ -15,3 +15,4 @@ Data frame with theater features
 \description{
 Extract theater-related features
 }
+\keyword{internal}

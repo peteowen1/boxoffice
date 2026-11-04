@@ -7,7 +7,7 @@
 #' @param delay_seconds Minimum delay between requests (default: 2)
 #' @param user_agent User agent string (uses package default if NULL)
 #' @return Session object (list with configuration)
-#' @export
+#' @keywords internal
 #' @examples
 #' \dontrun{
 #' session <- create_scrape_session("https://www.boxofficemojo.com")
@@ -21,15 +21,14 @@ create_scrape_session <- function(
     user_agent <- .boxoffice_env$user_agent
   }
 
-  session <- list(
-    base_url = base_url,
-    delay_seconds = delay_seconds,
-    user_agent = user_agent,
-    last_request = NULL,
-    request_count = 0
-  )
+  session <- new.env(parent = emptyenv())
+  session$base_url <- base_url
+  session$delay_seconds <- delay_seconds
+  session$user_agent <- user_agent
+  session$last_request <- NULL
+  session$request_count <- 0L
 
-  class(session) <- c("boxoffice_session", "list")
+  class(session) <- c("boxoffice_session", "environment")
   session
 }
 
@@ -70,14 +69,6 @@ polite_fetch <- function(
     cache_key = NULL,
     max_retries = 3
 ) {
-  # Check cache first
-  if (use_cache && !is.null(cache_source) && !is.null(cache_type) && !is.null(cache_key)) {
-    cached <- read_cache(cache_source, cache_type, cache_key)
-    if (!is.null(cached)) {
-      return(cached)
-    }
-  }
-
   # Get delay settings
   delay <- if (!is.null(session)) session$delay_seconds else 1
   user_agent <- if (!is.null(session)) session$user_agent else .boxoffice_env$user_agent
@@ -102,7 +93,6 @@ polite_fetch <- function(
       response <- httr2::request(url) |>
         httr2::req_user_agent(user_agent) |>
         httr2::req_timeout(30) |>
-        httr2::req_retry(max_tries = 1) |>
         httr2::req_perform()
 
       # Check status
@@ -156,10 +146,11 @@ polite_fetch <- function(
     session$request_count <- session$request_count + 1
   }
 
-  # Cache successful result
-  if (!is.null(result) && use_cache && !is.null(cache_source)) {
-    write_cache(cache_source, cache_type, cache_key, result)
-  }
+  # NOTE: We intentionally do NOT cache html_document objects here.
+  # xml_document objects contain external pointers that cannot survive
+
+  # saveRDS/readRDS. The individual scrape functions (scrape_bom_daily,
+  # etc.) cache their own parsed results (data frames/lists) instead.
 
   result
 }
@@ -241,5 +232,97 @@ batch_scrape <- function(items, scrape_fn, ..., .progress = TRUE, .label = "item
     cli::cli_progress_done()
   }
 
+  results
+}
+
+#' Batch scrape daily data with checkpoint/resume support
+#'
+#' Shared implementation for scrape_bom_daily_batch and scrape_numbers_daily_batch.
+#' Handles progress tracking, checkpoint saving, and skipping already-scraped items.
+#'
+#' @param ids Character vector of film identifiers to scrape
+#' @param scrape_fn Function to call for each id (e.g., scrape_bom_daily)
+#' @param use_cache Logical: pass through to scrape_fn
+#' @param checkpoint_file Optional file path for checkpoint saves (NULL to disable)
+#' @param save_every Save checkpoint every N films (default: 500)
+#' @param progress Show progress bar
+#' @return Named list of data frames
+#' @keywords internal
+batch_scrape_daily <- function(
+    ids,
+    scrape_fn,
+    use_cache = TRUE,
+    checkpoint_file = NULL,
+    save_every = 500,
+    progress = TRUE
+) {
+  n <- length(ids)
+  if (n == 0) return(list())
+
+  # Load existing checkpoint if available
+  existing <- list()
+  if (!is.null(checkpoint_file) && file.exists(checkpoint_file)) {
+    existing <- readRDS(checkpoint_file)
+    cli::cli_alert_info("Loaded {length(existing)} existing films from {checkpoint_file}")
+  }
+
+  # Skip already-scraped films
+  to_scrape <- setdiff(ids, names(existing))
+
+  if (length(to_scrape) == 0) {
+    cli::cli_alert_success("All {n} films already scraped")
+    return(existing[ids[ids %in% names(existing)]])
+  }
+
+  cli::cli_alert_info("Scraping {length(to_scrape)} new films ({length(existing)} already done)")
+
+  if (progress) {
+    cli::cli_progress_bar(
+      format = "Scraping daily data [{cli::pb_current}/{cli::pb_total}] {cli::pb_bar} {cli::pb_percent}",
+      total = length(to_scrape)
+    )
+  }
+
+  results <- existing
+  new_count <- 0
+
+  for (i in seq_along(to_scrape)) {
+    id <- to_scrape[i]
+    results[[id]] <- tryCatch(
+      scrape_fn(id, use_cache = use_cache),
+      error = function(e) {
+        cli::cli_alert_danger("Error scraping {id}: {e$message}")
+        NULL
+      }
+    )
+
+    new_count <- new_count + 1
+
+    # Save checkpoint periodically
+    if (!is.null(checkpoint_file) && save_every > 0 && new_count %% save_every == 0) {
+      checkpoint_dir <- dirname(checkpoint_file)
+      if (!dir.exists(checkpoint_dir)) dir.create(checkpoint_dir, recursive = TRUE)
+      clean_results <- results[!vapply(results, is.null, logical(1))]
+      saveRDS(clean_results, checkpoint_file)
+      cli::cli_alert_success("Checkpoint: saved {length(clean_results)} films")
+    }
+
+    if (progress) cli::cli_progress_update()
+  }
+
+  if (progress) cli::cli_progress_done()
+
+  # Remove NULL entries
+  results <- results[!vapply(results, is.null, logical(1))]
+
+  # Final save
+  if (!is.null(checkpoint_file) && save_every > 0) {
+    checkpoint_dir <- dirname(checkpoint_file)
+    if (!dir.exists(checkpoint_dir)) dir.create(checkpoint_dir, recursive = TRUE)
+    saveRDS(results, checkpoint_file)
+    cli::cli_alert_success("Saved {length(results)} films to {checkpoint_file}")
+  }
+
+  cli::cli_alert_success("Successfully scraped {length(results)}/{n} films")
   results
 }

@@ -7,7 +7,7 @@
 #' @param numbers_daily Data frame from scrape_numbers_daily
 #' @param prefer_source Which source to prefer for conflicts ("bom" or "numbers")
 #' @return Merged data frame with source indicator for each day
-#' @export
+#' @keywords internal
 merge_daily_data <- function(bom_daily, numbers_daily, prefer_source = "bom") {
   # Handle NULL/empty inputs
   if (is.null(bom_daily) || nrow(bom_daily) == 0) {
@@ -74,7 +74,7 @@ merge_daily_data <- function(bom_daily, numbers_daily, prefer_source = "bom") {
 #' @param bom_metadata List from scrape_bom_metadata
 #' @param numbers_metadata List from scrape_numbers_metadata
 #' @return List with merged metadata
-#' @export
+#' @keywords internal
 merge_metadata <- function(bom_metadata, numbers_metadata) {
   # Start with BOM as base
   if (is.null(bom_metadata)) {
@@ -85,22 +85,22 @@ merge_metadata <- function(bom_metadata, numbers_metadata) {
   }
 
   merged <- list(
-    title = bom_metadata$title %||% numbers_metadata$title,
-    release_date = bom_metadata$release_date %||% numbers_metadata$release_date,
-    mpaa_rating = bom_metadata$mpaa_rating %||% numbers_metadata$mpaa_rating,
-    runtime = bom_metadata$runtime %||% numbers_metadata$runtime,
+    title = coalesce_value(bom_metadata$title, numbers_metadata$title),
+    release_date = coalesce_value(bom_metadata$release_date, numbers_metadata$release_date),
+    mpaa_rating = coalesce_value(bom_metadata$mpaa_rating, numbers_metadata$mpaa_rating),
+    runtime = coalesce_value(bom_metadata$runtime, numbers_metadata$runtime),
     genres = if (length(bom_metadata$genres) > 0) bom_metadata$genres else numbers_metadata$genres,
-    distributor = bom_metadata$distributor %||% numbers_metadata$distributor,
+    distributor = coalesce_value(bom_metadata$distributor, numbers_metadata$distributor),
 
     # Prefer Numbers for budget (more reliable)
-    budget = numbers_metadata$budget %||% bom_metadata$budget,
+    budget = coalesce_value(numbers_metadata$budget, bom_metadata$budget),
 
     # Financial data - prefer BOM for consistency
-    opening_gross = bom_metadata$opening_gross %||% numbers_metadata$opening_weekend,
-    opening_theaters = bom_metadata$opening_theaters %||% numbers_metadata$opening_theaters,
-    domestic_gross = bom_metadata$domestic_gross %||% numbers_metadata$domestic_gross,
-    international_gross = bom_metadata$international_gross %||% numbers_metadata$international_gross,
-    worldwide_gross = bom_metadata$worldwide_gross %||% numbers_metadata$worldwide_gross,
+    opening_gross = coalesce_value(bom_metadata$opening_gross, numbers_metadata$opening_weekend),
+    opening_theaters = coalesce_value(bom_metadata$opening_theaters, numbers_metadata$opening_theaters),
+    domestic_gross = coalesce_value(bom_metadata$domestic_gross, numbers_metadata$domestic_gross),
+    international_gross = coalesce_value(bom_metadata$international_gross, numbers_metadata$international_gross),
+    worldwide_gross = coalesce_value(bom_metadata$worldwide_gross, numbers_metadata$worldwide_gross),
 
     # Source identifiers
     bom_id = bom_metadata$release_id,
@@ -116,7 +116,7 @@ merge_metadata <- function(bom_metadata, numbers_metadata) {
 #'
 #' @param daily_data Data frame with daily box office
 #' @return List with: is_valid, issues (character vector), cleaned_data
-#' @export
+#' @keywords internal
 validate_daily_data <- function(daily_data) {
   if (is.null(daily_data) || nrow(daily_data) == 0) {
     return(list(is_valid = FALSE, issues = "Empty data", cleaned_data = NULL))
@@ -150,7 +150,7 @@ validate_daily_data <- function(daily_data) {
   }
 
   # Check cumulative is monotonically increasing
-  if ("cumulative_gross" %in% names(cleaned)) {
+  if ("cumulative_gross" %in% names(cleaned) && any(!is.na(cleaned$cumulative_gross))) {
     cum_diff <- diff(cleaned$cumulative_gross)
     decreasing <- sum(cum_diff < 0, na.rm = TRUE)
     if (decreasing > 0) {
@@ -182,7 +182,7 @@ validate_daily_data <- function(daily_data) {
 #' @param daily_data Data frame with daily box office
 #' @param method Character: "interpolate", "zero", or "previous"
 #' @return Data frame with complete daily series
-#' @export
+#' @keywords internal
 fill_missing_days <- function(daily_data, method = "interpolate") {
   if (is.null(daily_data) || nrow(daily_data) == 0) {
     return(daily_data)
@@ -231,6 +231,7 @@ fill_missing_days <- function(daily_data, method = "interpolate") {
     combined$daily_gross[is.na(combined$daily_gross)] <- 0
   } else if (method == "previous") {
     # Forward fill
+    rlang::check_installed("zoo", reason = "for forward-fill (method = 'previous')")
     for (col in names(combined)) {
       if (is.numeric(combined[[col]])) {
         combined[[col]] <- zoo::na.locf(combined[[col]], na.rm = FALSE)
@@ -252,7 +253,7 @@ fill_missing_days <- function(daily_data, method = "interpolate") {
 #'
 #' @param daily_data Data frame with daily box office
 #' @return Data frame with additional columns
-#' @export
+#' @keywords internal
 calculate_derived_metrics <- function(daily_data) {
   if (is.null(daily_data) || nrow(daily_data) == 0) {
     return(daily_data)
@@ -281,7 +282,8 @@ calculate_derived_metrics <- function(daily_data) {
   if ("daily_gross" %in% names(daily_data)) {
     daily_data <- daily_data[order(daily_data$day_number), ]
     daily_data$daily_change <- c(NA, diff(daily_data$daily_gross))
-    daily_data$daily_pct_change <- daily_data$daily_change / dplyr::lag(daily_data$daily_gross)
+    prev_gross <- c(NA, daily_data$daily_gross[-nrow(daily_data)])
+    daily_data$daily_pct_change <- daily_data$daily_change / prev_gross
   }
 
   # 7-day rolling average
@@ -302,7 +304,7 @@ calculate_derived_metrics <- function(daily_data) {
 #'
 #' @param daily_data Data frame with daily box office
 #' @return List with opening metrics
-#' @export
+#' @keywords internal
 calculate_opening_metrics <- function(daily_data) {
   if (is.null(daily_data) || nrow(daily_data) == 0) {
     return(list())
@@ -322,16 +324,21 @@ calculate_opening_metrics <- function(daily_data) {
     metrics$opening_day_of_week <- day1$day_of_week[1]
   }
 
-  # Opening weekend (days 1-3, assuming Friday open)
-  weekend <- daily_data[daily_data$day_number <= 3, ]
+  # Opening weekend (first Fri-Sat-Sun window)
+  ow_idx <- opening_weekend_rows(daily_data)
+  weekend <- daily_data[ow_idx, ]
   if (nrow(weekend) >= 1) {
     metrics$opening_weekend_gross <- sum(weekend$daily_gross, na.rm = TRUE)
     metrics$opening_weekend_days <- nrow(weekend)
 
-    # Friday-to-Sunday ratio if we have all 3 days
+    # Friday-to-Saturday and Saturday-to-Sunday ratios
     if (nrow(weekend) == 3) {
-      metrics$friday_saturday_ratio <- weekend$daily_gross[2] / weekend$daily_gross[1]
-      metrics$saturday_sunday_ratio <- weekend$daily_gross[3] / weekend$daily_gross[2]
+      if (!is.na(weekend$daily_gross[1]) && weekend$daily_gross[1] > 0) {
+        metrics$friday_saturday_ratio <- weekend$daily_gross[2] / weekend$daily_gross[1]
+      }
+      if (!is.na(weekend$daily_gross[2]) && weekend$daily_gross[2] > 0) {
+        metrics$saturday_sunday_ratio <- weekend$daily_gross[3] / weekend$daily_gross[2]
+      }
     }
   }
 
@@ -346,13 +353,16 @@ calculate_opening_metrics <- function(daily_data) {
     metrics$weekend_to_week_ratio <- metrics$opening_weekend_gross / metrics$opening_week_gross
   }
 
-  # Second weekend drop
-  weekend2 <- daily_data[daily_data$day_number >= 8 & daily_data$day_number <= 10, ]
-  if (nrow(weekend2) >= 1 && !is.null(metrics$opening_weekend_gross)) {
-    second_weekend_gross <- sum(weekend2$daily_gross, na.rm = TRUE)
-    metrics$second_weekend_gross <- second_weekend_gross
-    metrics$second_weekend_drop <- (metrics$opening_weekend_gross - second_weekend_gross) /
-      metrics$opening_weekend_gross
+  # Second weekend drop (7 days after opening weekend)
+  if (nrow(weekend) > 0) {
+    w2_days <- weekend$day_number + 7
+    weekend2 <- daily_data[daily_data$day_number %in% w2_days, ]
+    if (nrow(weekend2) >= 1 && !is.null(metrics$opening_weekend_gross)) {
+      second_weekend_gross <- sum(weekend2$daily_gross, na.rm = TRUE)
+      metrics$second_weekend_gross <- second_weekend_gross
+      metrics$second_weekend_drop <- (metrics$opening_weekend_gross - second_weekend_gross) /
+        metrics$opening_weekend_gross
+    }
   }
 
   metrics
@@ -364,7 +374,7 @@ calculate_opening_metrics <- function(daily_data) {
 #'
 #' @param daily_data Data frame with daily box office
 #' @return List with theater metrics
-#' @export
+#' @keywords internal
 calculate_theater_metrics <- function(daily_data) {
   if (is.null(daily_data) || nrow(daily_data) == 0 || !"theaters" %in% names(daily_data)) {
     return(list())
@@ -422,7 +432,7 @@ calculate_theater_metrics <- function(daily_data) {
 #'
 #' @param daily_data Data frame with daily box office
 #' @return Numeric multiplier
-#' @export
+#' @keywords internal
 calculate_multiplier <- function(daily_data) {
   if (is.null(daily_data) || nrow(daily_data) == 0) {
     return(NA_real_)
@@ -433,8 +443,9 @@ calculate_multiplier <- function(daily_data) {
   # Opening weekend (first 3 days)
   opening <- sum(daily_data$daily_gross[daily_data$day_number <= 3], na.rm = TRUE)
 
-  # Total gross
-  total <- if ("cumulative_gross" %in% names(daily_data)) {
+  # Total gross — safely handle all-NA cumulative
+  total <- if ("cumulative_gross" %in% names(daily_data) &&
+               any(!is.na(daily_data$cumulative_gross))) {
     max(daily_data$cumulative_gross, na.rm = TRUE)
   } else {
     sum(daily_data$daily_gross, na.rm = TRUE)

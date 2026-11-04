@@ -185,12 +185,13 @@ project_total_gross <- function(model, features, confidence_level = 0.95) {
   rmse <- model$cv_rmse
 
   if (model$target_transform == "log") {
-    # Transform intervals
+    # Transform intervals from log-space
     lower <- exp(pred - z * rmse) - 1
     upper <- exp(pred + z * rmse) - 1
   } else {
-    lower <- pred_gross - z * rmse * pred_gross
-    upper <- pred_gross + z * rmse * pred_gross
+    # RMSE is in the same units as the target — use additive intervals
+    lower <- pred_gross - z * rmse
+    upper <- pred_gross + z * rmse
   }
 
   list(
@@ -278,16 +279,10 @@ project_daily_trajectory <- function(
                         length.out = length(future_days))
     }
 
-    for (i in seq_along(future_days)) {
-      base_pred <- a + b * future_days[i]
-
-      # Add weekday adjustment
-      dow <- future_dow[i]
-      adj <- weekday_factors$residual[weekday_factors$day_of_week == dow]
-      if (length(adj) == 0) adj <- 0
-
-      projected_gross[i] <- exp(base_pred + adj) - 1
-    }
+    base_pred <- a + b * future_days
+    adj <- weekday_factors$residual[match(future_dow, weekday_factors$day_of_week)]
+    adj[is.na(adj)] <- 0
+    projected_gross <- exp(base_pred + adj) - 1
   }
 
   # Ensure non-negative
@@ -303,11 +298,18 @@ project_daily_trajectory <- function(
   }
 
   # Build projection data frame
+  # Safely get prior cumulative — fall back to sum of daily if cumulative is missing
+  prior_cumulative <- if ("cumulative_gross" %in% names(daily_data) &&
+                          any(!is.na(daily_data$cumulative_gross))) {
+    max(daily_data$cumulative_gross, na.rm = TRUE)
+  } else {
+    sum(daily_data$daily_gross, na.rm = TRUE)
+  }
+
   projection <- data.frame(
     day_number = future_days,
     daily_gross = projected_gross,
-    cumulative_gross = cumsum(projected_gross) +
-      max(daily_data$cumulative_gross, na.rm = TRUE),
+    cumulative_gross = cumsum(projected_gross) + prior_cumulative,
     is_projected = TRUE
   )
 
@@ -383,12 +385,20 @@ find_comparable_films <- function(
     compare_cols <- compare_cols[1:min(5, length(compare_cols))]
   }
 
-  # Normalize features
+  # Normalize features to z-scores so all dimensions contribute equally
+  compare_matrix <- as.matrix(historical_features[, compare_cols, drop = FALSE])
   target_vals <- as.numeric(features[1, compare_cols])
 
-  # Calculate Euclidean distance
-  distances <- apply(historical_features[, compare_cols, drop = FALSE], 1, function(row) {
-    sqrt(sum((as.numeric(row) - target_vals)^2, na.rm = TRUE))
+  col_means <- colMeans(compare_matrix, na.rm = TRUE)
+  col_sds <- apply(compare_matrix, 2, stats::sd, na.rm = TRUE)
+  col_sds[col_sds == 0 | is.na(col_sds)] <- 1  # avoid division by zero
+
+  norm_matrix <- sweep(sweep(compare_matrix, 2, col_means), 2, col_sds, "/")
+  norm_target <- (target_vals - col_means) / col_sds
+
+  # Calculate Euclidean distance on normalized features
+  distances <- apply(norm_matrix, 1, function(row) {
+    sqrt(sum((as.numeric(row) - norm_target)^2, na.rm = TRUE))
   })
 
   # Get top N most similar
@@ -409,13 +419,19 @@ find_comparable_films <- function(
 #' @param metadata List with film metadata
 #' @param model Trained projection model (optional)
 #' @param historical_features Data frame for finding comparables (optional)
+#' @param adjust_for_inflation Logical: include inflation-adjusted figures
+#'   (default: FALSE)
+#' @param inflation_year Integer target year for constant dollars (default:
+#'   most recent year in the CPI table)
 #' @return List with projections and analysis
 #' @export
 generate_projection_report <- function(
     daily_data,
     metadata = NULL,
     model = NULL,
-    historical_features = NULL
+    historical_features = NULL,
+    adjust_for_inflation = FALSE,
+    inflation_year = max(cpi_annual$year)
 ) {
   report <- list(
     generated_at = Sys.time(),
@@ -423,11 +439,18 @@ generate_projection_report <- function(
     days_of_data = max(daily_data$day_number, na.rm = TRUE)
   )
 
-  # Current performance
+  # Current performance — safely handle missing cumulative_gross
+  total_gross <- if ("cumulative_gross" %in% names(daily_data) &&
+                     any(!is.na(daily_data$cumulative_gross))) {
+    max(daily_data$cumulative_gross, na.rm = TRUE)
+  } else {
+    sum(daily_data$daily_gross, na.rm = TRUE)
+  }
+
   report$current <- list(
-    total_gross = max(daily_data$cumulative_gross, na.rm = TRUE),
+    total_gross = total_gross,
     daily_average = mean(daily_data$daily_gross, na.rm = TRUE),
-    opening_weekend = sum(daily_data$daily_gross[daily_data$day_number <= 3], na.rm = TRUE)
+    opening_weekend = sum(daily_data$daily_gross[opening_weekend_rows(daily_data)], na.rm = TRUE)
   )
 
   # Opening metrics
@@ -439,7 +462,8 @@ generate_projection_report <- function(
   # Daily trajectory projection
   tryCatch({
     report$trajectory <- project_daily_trajectory(daily_data, days_ahead = 120)
-    report$projected_final_gross <- max(report$trajectory$cumulative_gross, na.rm = TRUE)
+    cum <- report$trajectory$cumulative_gross
+    report$projected_final_gross <- if (any(!is.na(cum))) max(cum, na.rm = TRUE) else NA_real_
   }, error = function(e) {
     cli::cli_alert_warning("Could not project trajectory: {e$message}")
   })
@@ -467,6 +491,38 @@ generate_projection_report <- function(
   # Calculated multiplier
   if (!is.null(report$projected_final_gross) && report$current$opening_weekend > 0) {
     report$projected_multiplier <- report$projected_final_gross / report$current$opening_weekend
+  }
+
+  # Inflation-adjusted figures
+  if (adjust_for_inflation) {
+    release_year <- if (!is.null(metadata$release_date)) {
+      lubridate::year(as.Date(metadata$release_date))
+    } else if (!is.null(metadata$year)) {
+      metadata$year
+    } else {
+      NULL
+    }
+
+    if (!is.null(release_year)) {
+      release_date_val <- if (!is.null(metadata$release_date)) as.Date(metadata$release_date) else NULL
+
+      adj <- function(x) {
+        adjust_inflation(x, release_year, inflation_year, release_date_val)
+      }
+
+      report$inflation_adjusted <- list(
+        target_year = inflation_year,
+        total_to_date = adj(report$current$total_gross),
+        opening_weekend = adj(report$current$opening_weekend),
+        projected_final = if (!is.null(report$projected_final_gross)) adj(report$projected_final_gross) else NULL
+      )
+
+      if (!is.null(report$model_projection)) {
+        report$inflation_adjusted$model_predicted <- adj(report$model_projection$predicted_total)
+        report$inflation_adjusted$model_lower <- adj(report$model_projection$lower_bound)
+        report$inflation_adjusted$model_upper <- adj(report$model_projection$upper_bound)
+      }
+    }
   }
 
   class(report) <- c("boxoffice_projection", "list")
@@ -504,6 +560,25 @@ print.boxoffice_projection <- function(x, ...) {
       "*" = "Predicted total: {format_gross(x$model_projection$predicted_total)}",
       "*" = "Range: {format_gross(x$model_projection$lower_bound)} - {format_gross(x$model_projection$upper_bound)}"
     ))
+  }
+
+  if (!is.null(x$inflation_adjusted)) {
+    adj <- x$inflation_adjusted
+    cli::cli_h2("Inflation-Adjusted ({adj$target_year} dollars)")
+    bullets <- c(
+      "*" = "Total to date: {format_gross(adj$total_to_date)}",
+      "*" = "Opening weekend: {format_gross(adj$opening_weekend)}"
+    )
+    if (!is.null(adj$projected_final)) {
+      bullets <- c(bullets, "*" = "Projected final: {format_gross(adj$projected_final)}")
+    }
+    if (!is.null(adj$model_predicted)) {
+      bullets <- c(bullets,
+        "*" = "Model predicted: {format_gross(adj$model_predicted)}",
+        "*" = "Model range: {format_gross(adj$model_lower)} - {format_gross(adj$model_upper)}"
+      )
+    }
+    cli::cli_bullets(bullets)
   }
 
   invisible(x)

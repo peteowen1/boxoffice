@@ -10,7 +10,9 @@ project_theatrical_run(
   days_available = NULL,
   model = NULL,
   sources = c("bom", "numbers"),
-  use_cache = TRUE
+  use_cache = TRUE,
+  adjust_for_inflation = FALSE,
+  inflation_year = max(cpi_annual$year)
 )
 }
 \arguments{
@@ -25,6 +27,12 @@ project_theatrical_run(
 \item{sources}{Data sources to use}
 
 \item{use_cache}{Use cached data}
+
+\item{adjust_for_inflation}{Logical: include inflation-adjusted figures in
+the report (default: FALSE)}
+
+\item{inflation_year}{Integer target year for constant dollars (default:
+most recent year in the CPI table)}
 }
 \value{
 Projection report object
@@ -37,5 +45,8 @@ performance.
 \dontrun{
 projection <- project_theatrical_run("Barbie", 2023)
 print(projection)
+
+# With inflation adjustment to 2025 dollars
+projection <- project_theatrical_run("Titanic", 1997, adjust_for_inflation = TRUE)
 }
 }
