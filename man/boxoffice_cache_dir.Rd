@@ -11,7 +11,8 @@ Character path to cache directory
 }
 \description{
 Returns the path to the boxoffice package cache directory.
-Uses project-local .cache folder by default.
+Defaults to tools::R_user_dir("boxoffice", "cache"); override with
+options(boxoffice.cache_dir = ...).
 Creates the directory if it doesn't exist.
 }
 \examples{
