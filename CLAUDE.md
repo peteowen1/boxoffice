@@ -29,20 +29,20 @@ discover_films(year)            → film index across BOM/Numbers/TMDB
 | `boxoffice.R` | Package-level docs and the top-level wrappers |
 | `scrape_bom.R` | Box Office Mojo: daily, yearly index, metadata. `scrape_bom_daily_batch()` for bulk |
 | `scrape_numbers.R` | The Numbers: parallel scrapers for cross-source validation |
-| `scrape_discovery.R` | `discover_films()` + `create_scrape_session()` (shared httr session) |
+| `scrape_discovery.R` | `discover_films()`, `match_films_across_sources()`, `create_scrape_session()` (shared httr session) |
 | `tmdb.R` | TMDB API for film metadata + actor lookups (`top_actors_by_boxoffice()`) |
 | `features.R` | Five extractor families: opening, trajectory, theater, temporal, categorical |
 | `prediction.R` | `train_projection_model()`, `project_total_gross()`, `project_daily_trajectory()` |
-| `data_processing.R` | `merge_daily_data()`, `merge_metadata()`, `match_films_across_sources()`, `fill_missing_days()` |
-| `cache.R` | Disk cache via `boxoffice_cache_dir()` — defaults to project-local `.cache/` (NOT user dir, to avoid OneDrive sync) |
+| `data_processing.R` | `merge_daily_data()`, `merge_metadata()`, `fill_missing_days()`, `calculate_multiplier()`, `calculate_opening_metrics()`, `validate_daily_data()` |
+| `cache.R` | Disk cache via `boxoffice_cache_dir()` — defaults to `tools::R_user_dir("boxoffice", "cache")` |
 | `rate_limiting.R` | `create_scrape_session()` + per-request throttling |
-| `utils.R` | Shared helpers, `calculate_multiplier()`, `calculate_opening_metrics()`, `validate_daily_data()` |
+| `utils.R` | Parsing/standardising helpers: `parse_currency()`, `parse_date_flexible()`, `standardize_distributor()`, etc. |
 | `data.R` | Roxygen for the `top_actors` packaged dataset |
 | `globals.R` | NSE declarations for `R CMD check` |
 
 ## Caching
 
-`boxoffice_cache_dir()` returns a project-local `.cache/` by default (intentionally **not** `tools::R_user_dir()` — the project lives under `C:\dev` to avoid OneDrive churn, and the cache follows). Override via `options(boxoffice.cache_dir = "path")`.
+`boxoffice_cache_dir()` returns `tools::R_user_dir("boxoffice", which = "cache")` by default (the per-user cache under `AppData/Local`, which OneDrive does not sync). Override via `options(boxoffice.cache_dir = "path")`.
 
 - `has_cached_daily(film_id)` / `has_cached_yearly(year)` — check before scraping
 - `cache_stats()` / `clear_cache()` — inspect and prune
@@ -59,7 +59,6 @@ discover_films(year)            → film index across BOM/Numbers/TMDB
 
 - `data-raw/data/` — downloaded historicals (gitignored, large)
 - `data-raw/top_actors.parquet` — cached TMDB actor enrichment
-- `.cache/` — scrape cache (project-local)
 
 ## Output Object
 

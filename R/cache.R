@@ -1,7 +1,8 @@
 #' Get default cache directory path
 #'
 #' Returns the path to the boxoffice package cache directory.
-#' Uses project-local .cache folder by default.
+#' Defaults to tools::R_user_dir("boxoffice", "cache"); override with
+#' options(boxoffice.cache_dir = ...).
 #' Creates the directory if it doesn't exist.
 #'
 #' @return Character path to cache directory
@@ -12,7 +13,7 @@ boxoffice_cache_dir <- function() {
   cache_dir <- getOption("boxoffice.cache_dir", NULL)
 
  if (is.null(cache_dir)) {
-    # Use a local (non-synced) directory to avoid OneDrive overhead
+    # Per-user cache dir (under AppData\Local on Windows, not OneDrive-synced)
     cache_dir <- file.path(tools::R_user_dir("boxoffice", which = "cache"))
   }
 
