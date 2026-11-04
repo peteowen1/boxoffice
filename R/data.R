@@ -35,25 +35,26 @@
 #' @source \url{https://www.boxofficemojo.com}
 "boxoffice_daily"
 
-#' Pre-computed Feature Matrix
-#'
-#' A dataset containing extracted features for all historical films,
-#' ready for model training.
-#'
-#' @format A data frame with features including:
-#' \describe{
-#'   \item{release_id}{Film identifier}
-#'   \item{title}{Film title}
-#'   \item{year}{Release year}
-#'   \item{day1_gross}{Opening day gross}
-#'   \item{weekend1_gross}{Opening weekend gross}
-#'   \item{week1_gross}{Opening week gross}
-#'   \item{opening_theaters}{Opening theater count}
-#'   \item{decay_slope}{Daily decay rate}
-#'   \item{weekend2_drop}{Second weekend drop percentage}
-#'   \item{total_gross}{Final domestic gross (target variable)}
-#' }
-"boxoffice_features"
+# TODO: Uncomment when boxoffice_features.rda is created in data/ (data-raw/download_historical_data.R builds it)
+# #' Pre-computed Feature Matrix
+# #'
+# #' A dataset containing extracted features for all historical films,
+# #' ready for model training.
+# #'
+# #' @format A data frame with features including:
+# #' \describe{
+# #'   \item{release_id}{Film identifier}
+# #'   \item{title}{Film title}
+# #'   \item{year}{Release year}
+# #'   \item{day1_gross}{Opening day gross}
+# #'   \item{weekend1_gross}{Opening weekend gross}
+# #'   \item{week1_gross}{Opening week gross}
+# #'   \item{opening_theaters}{Opening theater count}
+# #'   \item{decay_slope}{Daily decay rate}
+# #'   \item{weekend2_drop}{Second weekend drop percentage}
+# #'   \item{total_gross}{Final domestic gross (target variable)}
+# #' }
+# "boxoffice_features"
 
 # TODO: Uncomment when boxoffice_model.rda is created in data/
 # #' Pre-trained Projection Model
